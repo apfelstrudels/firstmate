@@ -19,8 +19,9 @@
 # ingests it, acknowledges the captured generation, then registers the next
 # cursor-anchored source. `relisten` tells that runner to poll again in the same
 # process, still holding the claim, after an empty window and after that re-arm.
-# A window the remote job worker preempted is reported to the runner as an empty
-# window, so it relistens too (see JOB_PREEMPTED below).
+# A window the remote job worker preempted, or one that hit its hard wall-clock
+# bound because the transport went ghost, is reported to the runner as an empty
+# window, so it relistens too (see JOB_PREEMPTED and BOUND_SECONDS below).
 # A continuity break is escalated and not re-armed, so the registration is dropped
 # and the runner stops. The runner does not refresh the owner lease.
 #
