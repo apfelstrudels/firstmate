@@ -86,6 +86,9 @@ WAIT_SECONDS=${FM_REMOTE_REPLY_WAIT_SECONDS:-55}
 # which keepalive probes do not always convict. Killing it loses nothing -
 # the read is cursor-anchored and non-destructive - and the runner relistens
 # exactly as after a preemption, publishing no caught-up watermark.
+# A timeout status can also be the remote job worker's OWN execution deadline
+# reporting through fm-on.sh; cmd_source separates the two by elapsed time,
+# because only a remote deadline can arrive before the local bound fires.
 BOUND_SECONDS=${FM_REMOTE_REPLY_BOUND_SECONDS:-$((WAIT_SECONDS + 120))}
 MAX_DOC_BYTES=${FM_REMOTE_REPLY_MAX_DOC_BYTES:-262144}
 # fm-on.sh returns ssh's status unchanged, so 255 alone means unavailable
@@ -278,15 +281,31 @@ WINDOW_CLOSED_EMPTY=75
 JOB_PREEMPTED=76
 
 cmd_source() {
-  local id=${1:-} started rc=0
+  local id=${1:-} started rc=0 elapsed
   validate_id "$id"
+  case "$BOUND_SECONDS" in
+    '' | *[!0-9]* | 0)
+      die "FM_REMOTE_REPLY_BOUND_SECONDS must be a positive integer of seconds, got '$BOUND_SECONDS'"
+      ;;
+  esac
   read_cursor "$id"
   started=$(fm_pending_reply_now)
   fm_run_timed "$BOUND_SECONDS" "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-delta-read.sh \
     "$REMOTE_LOG" "$CURSOR_OFFSET" "$CURSOR_HASH" "$WAIT_SECONDS" < /dev/null || rc=$?
   if [ "$rc" -eq "$WINDOW_CLOSED_EMPTY" ]; then
     fm_pending_reply_note_remote_channel_caught_up "$STATE" "$id" "$started" || true
-  elif [ "$rc" -eq "$JOB_PREEMPTED" ] || fm_timed_out "$rc"; then
+  elif [ "$rc" -eq "$JOB_PREEMPTED" ]; then
+    rc=$WINDOW_CLOSED_EMPTY
+  elif fm_timed_out "$rc"; then
+    # A timeout before the local bound could have fired is the remote job
+    # worker's own execution deadline (bin/fm-remote-job-lib.sh): the read
+    # FAILED, so exit like any other failed read instead of relistening into
+    # a worker that may keep missing its deadline. Epoch truncation can hide
+    # one second, so the guard band is one second under the bound.
+    elapsed=$(($(fm_pending_reply_now) - started))
+    if [ "$elapsed" -lt $((BOUND_SECONDS - 1)) ]; then
+      return "$rc"
+    fi
     rc=$WINDOW_CLOSED_EMPTY
   fi
   return "$rc"
