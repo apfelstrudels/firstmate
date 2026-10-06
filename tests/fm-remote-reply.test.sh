@@ -53,6 +53,8 @@ if [ -n "${FM_REMOTE_REPLY_POLL_LOG:-}" ]; then
   printf 'x\n' >> "$FM_REMOTE_REPLY_POLL_LOG"
 fi
 [ "${FM_REMOTE_REPLY_FAIL_READ:-}" != 1 ] || exit 255
+# Ghost transport: the remote end never answers and never closes the link.
+[ -z "${FM_REMOTE_REPLY_HANG_READ:-}" ] || { sleep 3600; exit 90; }
 host=$1
 entry=$2
 shift 2
@@ -898,6 +900,27 @@ set -e
 assert_absent "$PARENT/state/remote-replies/ios.caught-up" \
   "a preempted reply poll published a caught-up watermark"
 pass "a preempted reply poll reports a closed window without publishing channel freshness"
+
+# A ghost transport - the remote end died without closing the link - holds the
+# read open past its window, and keepalive probes do not always convict it.
+# The poll's hard bound kills it and reports a closed window so the runner
+# relistens; like a preemption it proves no caught-up watermark. Without the
+# bound this poll would hang for the full hour the fixture sleeps.
+rm -f -- "$PARENT/state/remote-replies/ios.caught-up"
+ghost_before=$(date +%s)
+set +e
+FM_REMOTE_REPLY_HANG_READ=1 FM_REMOTE_REPLY_WAIT_SECONDS=60 FM_REMOTE_REPLY_BOUND_SECONDS=3 \
+  remote_env "$ADAPTER" source ios > "$TMP_ROOT/ghost-source.out" 2>&1
+ghost_rc=$?
+set -e
+ghost_after=$(date +%s)
+[ "$ghost_rc" -eq 75 ] \
+  || fail "a ghost reply poll did not report a closed window: $ghost_rc"
+[ $((ghost_after - ghost_before)) -lt 60 ] \
+  || fail "a ghost reply poll outlived its hard bound"
+assert_absent "$PARENT/state/remote-replies/ios.caught-up" \
+  "a ghost reply poll published a caught-up watermark"
+pass "a ghost reply poll dies at its hard bound and relistens without a watermark"
 
 # The per-cycle liveness probe is a non-preemptible job for the same remote home,
 # so the job worker preempts the listener's long-poll on every watcher cycle.

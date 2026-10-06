@@ -79,6 +79,13 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 CURSOR_DIR="$STATE/remote-replies"
 REMOTE_LOG='state/parent-replies.status'
 WAIT_SECONDS=${FM_REMOTE_REPLY_WAIT_SECONDS:-55}
+# Hard wall-clock bound on one poll, window plus transport and queue slack.
+# The read itself ends after WAIT_SECONDS, so a poll still running at
+# BOUND_SECONDS is a ghost: the remote end died without closing the link,
+# which keepalive probes do not always convict. Killing it loses nothing -
+# the read is cursor-anchored and non-destructive - and the runner relistens
+# exactly as after a preemption, publishing no caught-up watermark.
+BOUND_SECONDS=${FM_REMOTE_REPLY_BOUND_SECONDS:-$((WAIT_SECONDS + 120))}
 MAX_DOC_BYTES=${FM_REMOTE_REPLY_MAX_DOC_BYTES:-262144}
 # fm-on.sh returns ssh's status unchanged, so 255 alone means unavailable
 # transport or unknown remote completion. Any other nonzero status is the remote
@@ -95,6 +102,8 @@ DOCUMENT_LOCAL_FAILURE=2
 . "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
@@ -272,11 +281,11 @@ cmd_source() {
   validate_id "$id"
   read_cursor "$id"
   started=$(fm_pending_reply_now)
-  "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-delta-read.sh \
+  fm_run_timed "$BOUND_SECONDS" "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-delta-read.sh \
     "$REMOTE_LOG" "$CURSOR_OFFSET" "$CURSOR_HASH" "$WAIT_SECONDS" < /dev/null || rc=$?
   if [ "$rc" -eq "$WINDOW_CLOSED_EMPTY" ]; then
     fm_pending_reply_note_remote_channel_caught_up "$STATE" "$id" "$started" || true
-  elif [ "$rc" -eq "$JOB_PREEMPTED" ]; then
+  elif [ "$rc" -eq "$JOB_PREEMPTED" ] || fm_timed_out "$rc"; then
     rc=$WINDOW_CLOSED_EMPTY
   fi
   return "$rc"
