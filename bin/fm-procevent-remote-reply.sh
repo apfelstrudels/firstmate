@@ -284,10 +284,16 @@ cmd_source() {
   local id=${1:-} started rc=0 elapsed
   validate_id "$id"
   case "$BOUND_SECONDS" in
-    '' | *[!0-9]* | 0)
+    '' | *[!0-9]*)
       die "FM_REMOTE_REPLY_BOUND_SECONDS must be a positive integer of seconds, got '$BOUND_SECONDS'"
       ;;
   esac
+  # All-digit strings can still be invalid octal literals (08, 09) or encode
+  # zero (00): force base 10 before any arithmetic, then reject non-positive.
+  BOUND_SECONDS=$((10#$BOUND_SECONDS))
+  if [ "$BOUND_SECONDS" -le 0 ]; then
+    die "FM_REMOTE_REPLY_BOUND_SECONDS must be a positive integer of seconds, got '$BOUND_SECONDS'"
+  fi
   read_cursor "$id"
   started=$(fm_pending_reply_now)
   fm_run_timed "$BOUND_SECONDS" "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-delta-read.sh \

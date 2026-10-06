@@ -910,6 +910,7 @@ pass "a preempted reply poll reports a closed window without publishing channel 
 # deadline keeps a bound regression from stalling the suite on the fixture's
 # hour-long sleep: a working bound exits 75 within about 3 seconds.
 rm -f -- "$PARENT/state/remote-replies/ios.caught-up"
+ghost_started=$(date +%s)
 set +e
 # shellcheck disable=SC2016 # Positional parameters expand in the child shell.
 remote_env env FM_REMOTE_REPLY_HANG_READ=1 FM_REMOTE_REPLY_WAIT_SECONDS=60 FM_REMOTE_REPLY_BOUND_SECONDS=3 \
@@ -917,8 +918,11 @@ remote_env env FM_REMOTE_REPLY_HANG_READ=1 FM_REMOTE_REPLY_WAIT_SECONDS=60 FM_RE
   _ "$ROOT" "$ADAPTER" ios > "$TMP_ROOT/ghost-source.out" 2>&1
 ghost_rc=$?
 set -e
+ghost_elapsed=$(($(date +%s) - ghost_started))
 [ "$ghost_rc" -eq 75 ] \
   || fail "a ghost reply poll did not report a closed window inside its bound: $ghost_rc"
+[ "$ghost_elapsed" -lt 15 ] \
+  || fail "a ghost reply poll took ${ghost_elapsed}s, past its 3s bound and toward the outer 20s deadline"
 assert_absent "$PARENT/state/remote-replies/ios.caught-up" \
   "a ghost reply poll published a caught-up watermark"
 pass "a ghost reply poll dies at its hard bound and relistens without a watermark"
