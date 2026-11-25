@@ -1,0 +1,28 @@
+Lab: bare origin + standalone clone as the firstmate home checkout, disposable FM_HOME from bin/fm-lab-home.sh create.
+
+[1] Home at 2f000eb4 (base), captain ran `rm VISION.md`; origin still tracks VISION.md
+$ git status --short
+ D VISION.md
+$ FM_HOME=$LAB bin/fm-update.sh
+firstmate: skipped: dirty working tree
+reread-firstmate: no
+HEAD stays 2f000eb4, VISION.md still shown deleted (home blocked)
+
+[2] origin main moved to 1de763b4 (this change), local deletion still uncommitted
+$ FM_HOME=$LAB bin/fm-update.sh
+firstmate: skipped: dirty working tree
+-> the guard is unconditional on a dirty tree; the upstream removal alone does not
+   auto-unblock - the local deletion must be reverted first.
+
+[3] `git checkout -- VISION.md` (tree clean), then update against 1de763b4
+$ FM_HOME=$LAB bin/fm-update.sh
+firstmate: updated 2f000eb4..1de763b4
+reread-firstmate: no
+HEAD: 1de763b4 Remove VISION.md and reconcile its references
+$ git status --short        (clean)
+$ ls VISION.md
+ls: VISION.md: No such file or directory   -> removal is permanent via fast-forward
+
+[4] Doc-audience registry consumer
+at 1de763b4:                  fm-doc-audience-check: ok surfaces=141 local_links=1246
+at 2f000eb4 + rm VISION.md:   fm-doc-audience-check: cannot read prose surface VISION.md
